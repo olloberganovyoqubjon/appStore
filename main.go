@@ -5,6 +5,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/png"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
@@ -13,14 +21,6 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
-	"image"
-	_ "image/png"
-	"io"
-	"net/http"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
 )
 
 // Software - API dan keladigan dastur ma'lumotlari
@@ -75,7 +75,7 @@ func downloadFile(url, filePath string) error {
 }
 
 func main() {
-	myApp := app.New()
+	myApp := app.NewWithID("men-go-fyne")
 	myWindow := myApp.NewWindow("Men Go Fyne")
 	myWindow.Resize(fyne.NewSize(800, 500))
 
@@ -148,8 +148,15 @@ func createSoftwareCard(software Software, descriptionLabel *widget.Label, myWin
 		iconImage = canvas.NewImageFromResource(theme.FileIcon())
 	}
 
+	// Tugmalar
 	downloadButton := widget.NewButtonWithIcon("", theme.DownloadIcon(), nil)
 	downloadButton.Importance = widget.LowImportance
+
+	progressBar := widget.NewProgressBarInfinite()
+	progressBar.Hide()
+
+	updateButton := widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), nil)
+	updateButton.Hide()
 
 	infoButton := widget.NewButtonWithIcon("", theme.InfoIcon(), func() {
 		descriptionLabel.SetText("📌 " + software.Description)
@@ -158,37 +165,35 @@ func createSoftwareCard(software Software, descriptionLabel *widget.Label, myWin
 
 	version := widget.NewLabelWithStyle("v: "+software.Version, fyne.TextAlignTrailing, fyne.TextStyle{Bold: true, Italic: true})
 
-	// Yuklab olish tugmasi bosilganda
 	downloadButton.OnTapped = func() {
 		dialog.ShowFolderOpen(func(folder fyne.ListableURI, err error) {
-			if err != nil {
-				fmt.Println("Xatolik:", err)
-				return
-			}
-			if folder == nil {
-				fmt.Println("Papka tanlanmadi")
+			if err != nil || folder == nil {
 				return
 			}
 
-			downloadPath = folder.Path() // Foydalanuvchi tanlagan papkani saqlash
-
+			downloadPath = folder.Path()
 			fileURL := fmt.Sprintf("http://localhost:8080/appStore/download/%s", software.ID)
 			filePath := filepath.Join(downloadPath, software.MainFile)
 
+			// Yuklanish indikatorini ko'rsatish
 			downloadButton.Hide()
-			loadingIndicator := canvas.NewText("⏳ Yuklanmoqda...", theme.ForegroundColor())
-			loadingIndicator.Alignment = fyne.TextAlignCenter
+			progressBar.Show()
 
 			go func() {
 				err := downloadFile(fileURL, filePath)
+
 				if err != nil {
-					loadingIndicator.Text = "❌ Xatolik: " + err.Error()
-				} else {
-					loadingIndicator.Text = "✅ Yuklandi: " + filePath
+					fmt.Println("Xatolik yuz berdi:", err)
+					return
 				}
-				loadingIndicator.Refresh()
-				time.Sleep(2 * time.Second)
-				downloadButton.Show()
+
+				fyne.CurrentApp().SendNotification(fyne.NewNotification("Yuklandi", filePath))
+
+				// UI yangilash
+				fyne.CurrentApp().Driver().CanvasForObject(downloadButton).Refresh(downloadButton)
+
+				progressBar.Hide()
+				updateButton.Show()
 			}()
 		}, myWindow)
 	}
@@ -199,8 +204,13 @@ func createSoftwareCard(software Software, descriptionLabel *widget.Label, myWin
 		version,
 	)
 
-	titleContainer := container.NewBorder(nil, nil, nil, downloadButton, title)
+	buttonContainer := container.NewHBox(
+		progressBar,
+		downloadButton,
+		updateButton,
+	)
 
+	titleContainer := container.NewBorder(nil, nil, nil, buttonContainer, title)
 	content := container.NewVBox(
 		titleContainer,
 		container.NewCenter(iconImage),
