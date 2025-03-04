@@ -18,9 +18,11 @@ type ResponseData struct {
 
 // Yuklangan dastur ma'lumotlari uchun struktura
 type DownloadedSoftware struct {
-	ID           string `json:"id"`            // Dastur identifikatori
-	Name         string `json:"name"`          // Dastur nomi
-	Version      string `json:"version"`       // Dastur versiyasi
-	FilePath     string `json:"file_path"`     // Faylning mahalliy yo'li
-	DownloadDate string `json:"download_date"` // Yuklash sanasi va vaqti
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Version      string `json:"version"`
+	DirPath      string `json:"dir_path"`
+	MainFile     string `json:"main_file"`
+	IconPath     string `json:"icon_path"` // Yangi maydon
+	DownloadDate string `json:"download_date"`
 }

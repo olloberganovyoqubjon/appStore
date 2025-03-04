@@ -2,9 +2,10 @@ package main
 
 // Asosiy paket - dastur ishga tushadigan joy
 import (
+	UI "main/ui" // Loyihaning UI komponentlari paketi
+
 	"fyne.io/fyne/v2"     // Fyne GUI frameworkning asosiy paketi
 	"fyne.io/fyne/v2/app" // Fyne ilovasini boshqarish uchun
-	"main/ui"             // Loyihaning UI komponentlari paketi
 )
 
 func main() {
@@ -18,7 +19,7 @@ func main() {
 	myWindow.Resize(fyne.NewSize(800, 500))
 
 	// UI ni sozlash funksiyasini chaqirish (ui paketidan)
-	ui.SetupUI(myWindow)
+	UI.SetupUI(myWindow)
 
 	// Oynani ko'rsatish va dasturni ishga tushirish
 	myWindow.ShowAndRun()

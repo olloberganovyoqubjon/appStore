@@ -1,30 +1,29 @@
 package ui
 
-// Foydalanuvchi interfeysi komponentlari uchun paket
 import (
-	"bytes"           // Baytlar bilan ishlash uchun
-	"encoding/base64" // Base64 dekodlash uchun
-	"fmt"             // Formatlash va chop etish uchun
-	"image"           // Rasm ma'lumotlari bilan ishlash uchun
-	_ "image/png"     // PNG formatini qo'llab-quvvatlash uchun
-	"path/filepath"   // Fayl yo'llarini boshqarish uchun
-	"strings"         // Stringlar bilan ishlash uchun
-	"time"            // Vaqt bilan ishlash uchun
+	"bytes"
+	"encoding/base64"
+	"fmt"
+	"image"
+	_ "image/png"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
-	"main/models"   // Loyiha modellarini ishlatish uchun
-	"main/services" // Xizmatlar paketini ishlatish uchun
-	"main/storage"  // Saqlash paketini ishlatish uchun
+	"main/models"
+	"main/services"
+	"main/storage"
 
-	"fyne.io/fyne/v2"           // Fyne asosiy paketi
-	"fyne.io/fyne/v2/canvas"    // Grafik elementlar uchun
-	"fyne.io/fyne/v2/container" // Konteynerlar uchun
-	"fyne.io/fyne/v2/dialog"    // Dialog oynalari uchun
-	"fyne.io/fyne/v2/layout"    // Tartibni boshqarish uchun
-	"fyne.io/fyne/v2/theme"     // Temalar va ikonkalarni ishlatish uchun
-	"fyne.io/fyne/v2/widget"    // Vidjetlar uchun
+	"fyne.io/fyne/v2"
+	"fyne.io/fyne/v2/canvas"
+	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
+	"fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/theme"
+	"fyne.io/fyne/v2/widget"
 )
 
-// UI ni sozlash funksiyasi
 func SetupUI(myWindow fyne.Window) {
 	// Yuklanish xabari uchun yorliq
 	label := widget.NewLabel("Ma'lumot yuklanmoqda...")
@@ -48,7 +47,7 @@ func SetupUI(myWindow fyne.Window) {
 	searchEntry.SetPlaceHolder("Dastur nomi yoki tavsif bo'yicha qidirish...")
 
 	// Dastur kartalari uchun grid konteyner (150x150 o'lchamli)
-	contentContainer := container.NewGridWrap(fyne.NewSize(150, 150))
+	contentContainer := container.NewGridWrap(fyne.NewSize(200, 150))
 
 	// Dastur ro'yxatini yangilash funksiyasi
 	updateSoftwareList := func(query string) {
@@ -99,148 +98,281 @@ func SetupUI(myWindow fyne.Window) {
 	myWindow.SetContent(mainContainer)
 }
 
-// Dastur kartasini yaratish funksiyasi
+// Dastur kartasini yaratish funksiyasi (yangilangan)
 func createSoftwareCard(software models.Software, descriptionLabel *widget.Label, myWindow fyne.Window) fyne.CanvasObject {
-	// Dastur nomini qalin va markazlashtirilgan yorliq sifatida yaratish
 	title := widget.NewLabelWithStyle(software.Name, fyne.TextAlignCenter, fyne.TextStyle{Bold: true})
 
-	// Ikonka uchun o'zgaruvchi
 	var iconImage *canvas.Image
-	if software.Icon != "" { // Agar ikonka mavjud bo'lsa
-		// Base64 dan dekodlash
+	if software.Icon != "" {
 		decoded, err := base64.StdEncoding.DecodeString(software.Icon)
-		if err != nil { // Agar dekodlashda xatolik bo'lsa
-			// Xato ikonkasini ishlatish
+		if err != nil {
 			iconImage = canvas.NewImageFromResource(theme.ErrorIcon())
-		} else { // Dekodlash muvaffaqiyatli bo'lsa
-			// Baytlardan rasmni dekodlash
+		} else {
 			img, _, err := image.Decode(bytes.NewReader(decoded))
-			if err != nil { // Agar rasm dekodlashda xatolik bo'lsa
-				// Xato ikonkasini ishlatish
+			if err != nil {
 				iconImage = canvas.NewImageFromResource(theme.ErrorIcon())
-			} else { // Rasm muvaffaqiyatli dekodlansa
-				// Rasmni Fyne tasviriga aylantirish
+			} else {
 				iconImage = canvas.NewImageFromImage(img)
-				// Tasvirni o'lchamga moslashtirish
 				iconImage.FillMode = canvas.ImageFillContain
-				// Minimal o'lchamni belgilash
 				iconImage.SetMinSize(fyne.NewSize(80, 80))
 			}
 		}
 	}
-	if iconImage == nil { // Agar ikonka hali aniqlanmagan bo'lsa
-		// Standart fayl ikonkasini ishlatish
+	if iconImage == nil {
 		iconImage = canvas.NewImageFromResource(theme.FileIcon())
 	}
 
-	// Yuklash tugmasi (ikonka bilan)
-	downloadButton := widget.NewButtonWithIcon("", theme.DownloadIcon(), nil)
-	// Tugma ahamiyatini past darajaga qo'yish
-	downloadButton.Importance = widget.LowImportance
+	// Tugmalar va progress bar
+	deleteButton := widget.NewButtonWithIcon("", theme.DeleteIcon(), nil) // Yangi "Delete" tugmasi
+	deleteButton.Importance = widget.LowImportance
+	deleteButton.Hide()
 
-	// Cheksiz progress bar (yuklanayotganlik ko'rsatkichi)
+	downloadButton := widget.NewButtonWithIcon("", theme.DownloadIcon(), nil)
+	downloadButton.Importance = widget.LowImportance
+	downloadButton.Hide()
+
 	progressBar := widget.NewProgressBarInfinite()
-	// Dastlab progress barni yashirish
 	progressBar.Hide()
 
-	// Yangilash tugmasi
 	updateButton := widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), nil)
-	// Dastlab yangilash tugmasini yashirish
 	updateButton.Hide()
 
-	// Ma'lumot tugmasi
 	infoButton := widget.NewButtonWithIcon("", theme.InfoIcon(), func() {
-		// Tavsifni ko'rsatish
 		descriptionLabel.SetText("📌 " + software.Description)
 	})
-	// Tugma ahamiyatini past darajaga qo'yish
 	infoButton.Importance = widget.LowImportance
 
-	// Versiya yorlig'i (qalin va kursiv)
 	version := widget.NewLabelWithStyle("v: "+software.Version, fyne.TextAlignTrailing, fyne.TextStyle{Bold: true, Italic: true})
 
-	// Yuklash tugmasi bosilganda
-	downloadButton.OnTapped = func() {
-		// Papka tanlash dialogini ko'rsatish
-		dialog.ShowFolderOpen(func(folder fyne.ListableURI, err error) {
-			if err != nil || folder == nil { // Agar xatolik bo'lsa yoki papka tanlanmasa
-				return // Funksiyadan chiqish
+	// JSON fayldan yuklangan dasturlarni o'qish
+	downloadedSoftwares, err := storage.LoadDownloadedSoftware("downloaded_software.json")
+	if err != nil {
+		fmt.Println("JSON faylni o'qishda xatolik:", err)
+	}
+
+	// Dastur holatini tekshirish
+	var isDownloaded bool
+	var isLatestVersion bool
+	for _, downloaded := range downloadedSoftwares {
+		if downloaded.ID == software.ID {
+			isDownloaded = true
+			if downloaded.Version == software.Version {
+				isLatestVersion = true
 			}
+			break
+		}
+	}
 
-			// Tanlangan papka yo'lini saqlash
-			services.DownloadPath = folder.Path()
-			// Yuklash URL ni shakllantirish
-			fileURL := fmt.Sprintf("http://localhost:8080/appStore/download/%s", software.ID)
-			// Faylning mahalliy yo'lini yaratish
-			filePath := filepath.Join(services.DownloadPath, software.MainFile)
+	// Tugmalarni holatga qarab ko'rsatish
+	if !isDownloaded {
+		downloadButton.Show() // JSON da bo'lmasa faqat yuklab olish tugmasi
+	} else {
+		deleteButton.Show() // JSON da bo'lsa o'chirish tugmasi
+		if !isLatestVersion {
+			updateButton.Show() // Versiya eskirgan bo'lsa yangilash tugmasi
+		}
+	}
 
-			// Yuklash tugmasini yashirish
-			downloadButton.Hide()
-			// Progress barni ko'rsatish
-			progressBar.Show()
+	// O'chirish tugmasi funksiyasi
+	deleteButton.OnTapped = func() {
 
-			// Goroutinada yuklash (UI bloklanmasligi uchun)
-			go func() {
-				// Faylni yuklash
-				err := services.DownloadFile(fileURL, filePath)
-				if err != nil { // Agar xatolik bo'lsa
-					// Xatolikni konsolga chop etish
-					fmt.Println("Xatolik:", err)
-					return // Goroutindan chiqish
+		// Tasdiqlash dialogi
+		dialog.ShowConfirm("O'chirish", "Ushbu dasturni ro'yxatdan o'chirishni xohlaysizmi?", func(confirmed bool) {
+			if confirmed {
+				// Dastur ma'lumotlarini olish
+				softwareData, err := storage.GetSoftwareByID(software.ID, "downloaded_software.json")
+				if err != nil {
+					fmt.Println(err)
+					fyne.CurrentApp().SendNotification(fyne.NewNotification("Xatolik", "Dastur topilmadi"))
+					return
 				}
 
-				// Yuklangan dastur ma'lumotlarini tayyorlash
-				softwareData := models.DownloadedSoftware{
-					ID:           software.ID,
-					Name:         software.Name,
-					Version:      software.Version,
-					FilePath:     filePath,
-					DownloadDate: time.Now().Format("2006-01-02 15:04:05"), // Hozirgi vaqt
+				// Papkani o'chirish
+				if softwareData.DirPath != "" {
+					err = os.RemoveAll(softwareData.DirPath)
+					if err != nil {
+						fmt.Println("Papkani o'chirishda xatolik:", err)
+						fyne.CurrentApp().SendNotification(fyne.NewNotification("Xatolik", "Papka o'chirilmadi"))
+						return
+					}
+				}
+				err = storage.DeleteSoftware(software.ID, "downloaded_software.json")
+				if err != nil {
+					fmt.Println("O'chirishda xatolik:", err)
+					return
 				}
 
-				// Ma'lumotni JSON faylga saqlash
-				storage.SaveDownloadedSoftware(softwareData, "downloaded_software.json")
+				services.RemoveShortcut(softwareData.Name)
 
-				// Progress barni yashirish
-				progressBar.Hide()
-				// Yangilash tugmasini ko'rsatish
-				updateButton.Show()
-
-				// Yuklash tugaganligi haqida bildirishnoma yuborish
-				fyne.CurrentApp().SendNotification(fyne.NewNotification("Yuklandi", filePath))
-			}()
+				// UI ni yangilash
+				deleteButton.Hide()
+				updateButton.Hide()
+				downloadButton.Show()
+				fyne.CurrentApp().SendNotification(fyne.NewNotification("O'chirildi", software.Name+" ro'yxatdan o'chirildi"))
+			}
 		}, myWindow)
 	}
 
-	// Versiya va ma'lumot tugmasi uchun gorizontal konteyner
+	// Yuklash tugmasi funksiyasi
+	downloadButton.OnTapped = func() {
+		// dialog.ShowFolderOpen(func(folder fyne.ListableURI, err error) {
+		// 	if err != nil || folder == nil {
+		// 		return
+		// 	}
+
+		folder := services.GetUserLocalPath()
+		services.DownloadPath = filepath.Join(folder, software.ID)
+
+		if _, err := os.Stat(services.DownloadPath); err == nil {
+			err = os.RemoveAll(services.DownloadPath)
+			if err != nil {
+				fmt.Println("Papkani o'chirishda xatolik:", err)
+				return
+			}
+		}
+
+		err = os.Mkdir(services.DownloadPath, 0755)
+		if err != nil {
+			fmt.Println("Papka yaratishda xatolik:", err)
+			return
+		}
+
+		fileURL := fmt.Sprintf("http://localhost:8080/appStore/download/%s", software.ID)
+
+		downloadButton.Hide()
+		deleteButton.Hide()
+		updateButton.Hide()
+		progressBar.Show()
+
+		go func() {
+			mainFilePath, iconFilePath, err := services.DownloadFile(fileURL, services.DownloadPath)
+			if err != nil {
+				progressBar.Hide()
+				downloadButton.Show()
+				fyne.CurrentApp().SendNotification(fyne.NewNotification("Xatolik", "Yuklashda xatolik: "+err.Error()))
+				return
+			}
+
+			softwareData := models.DownloadedSoftware{
+				ID:           software.ID,
+				Name:         software.Name,
+				Version:      software.Version,
+				DirPath:      services.DownloadPath,
+				MainFile:     filepath.Base(mainFilePath),
+				IconPath:     filepath.Base(iconFilePath), // Ikonka yo'li saqlanadi
+				DownloadDate: time.Now().Format("2006-01-02 15:04:05"),
+			}
+
+			err = storage.SaveDownloadedSoftware(softwareData, "downloaded_software.json")
+			if err != nil {
+				fmt.Println("Saqlashda xatolik:", err)
+			}
+			progressBar.Hide()
+			deleteButton.Show()
+			fyne.CurrentApp().SendNotification(fyne.NewNotification("Yuklandi va o'rnatildi", mainFilePath))
+
+			programPath := filepath.Join(softwareData.DirPath, softwareData.MainFile)
+			err = services.CreateShortcut(programPath, softwareData.Name)
+			if err != nil {
+				fmt.Println("Dastur o'rnatilishida xatolik: ", err)
+			}
+		}()
+
+	}
+
+	// Yangilash tugmasi funksiyasi
+	updateButton.OnTapped = func() {
+		data, err := storage.GetSoftwareByID(software.ID, "downloaded_software.json")
+		if err != nil {
+			fmt.Println(err)
+			data = &models.DownloadedSoftware{} // Bo'sh ko'rsatkich
+		}
+
+		softwareData := *data // Dereferencing: * bilan qiymatni olish
+
+		softwareData = models.DownloadedSoftware{
+			ID:           software.ID,
+			Name:         software.Name,
+			Version:      software.Version,
+			DirPath:      softwareData.DirPath,
+			MainFile:     software.MainFile,
+			DownloadDate: time.Now().Format("2006-01-02 15:04:05"),
+		}
+
+		// Papkani o'chirish
+		if softwareData.DirPath != "" {
+			err = os.RemoveAll(softwareData.DirPath)
+			if err != nil {
+				fmt.Println("Papkani o'chirishda xatolik:", err)
+				fyne.CurrentApp().SendNotification(fyne.NewNotification("Xatolik", "Papka o'chirilmadi"))
+				return
+			}
+		}
+
+		services.RemoveShortcut(softwareData.Name)
+
+		fmt.Println("softwareData: ", softwareData)
+		storage.SaveDownloadedSoftware(softwareData, "downloaded_software.json")
+		fileURL := fmt.Sprintf("http://localhost:8080/appStore/download/%s", software.ID)
+		// filePath := filepath.Join(softwareData.DirPath, software.MainFile)
+
+		downloadButton.Hide()
+		deleteButton.Hide()
+		updateButton.Hide()
+		progressBar.Show()
+
+		go func() {
+			mainFile, _, err := services.DownloadFile(fileURL, softwareData.DirPath)
+			if err != nil {
+				fmt.Println("Xatolik:", err)
+				progressBar.Hide()
+				deleteButton.Show()
+				updateButton.Show() // Xatolik bo'lsa qayta yangilash imkoni
+				return
+			}
+
+			programPath := filepath.Join(softwareData.DirPath, softwareData.MainFile)
+			err = services.CreateShortcut(programPath, softwareData.Name)
+			if err != nil {
+				fmt.Println("Dastur o'rnatilishida xatolik: ", err)
+			}
+
+			progressBar.Hide()
+			deleteButton.Show() // Yangilash tugagach o'chirish tugmasi ko'rinadi
+
+			filePath := filepath.Join(services.DownloadPath, mainFile)
+			fyne.CurrentApp().SendNotification(fyne.NewNotification("Yangilandi", filePath))
+		}()
+	}
+
+	// Versiya va ma'lumot tugmasi uchun konteyner
 	versionContainer := container.NewHBox(
-		infoButton,         // Ma'lumot tugmasi
-		layout.NewSpacer(), // Bo'sh joy
-		version,            // Versiya yorlig'i
+		infoButton,
+		layout.NewSpacer(),
+		version,
 	)
 
-	// Tugmalar uchun gorizontal konteyner
+	// Tugmalar uchun konteyner
 	buttonContainer := container.NewHBox(
-		progressBar,    // Progress bar
-		downloadButton, // Yuklash tugmasi
-		updateButton,   // Yangilash tugmasi
+		progressBar,
+		deleteButton, // O'chirish tugmasi qo'shildi
+		downloadButton,
+		updateButton,
 	)
 
 	// Sarlavha va tugmalar konteyneri
 	titleContainer := container.NewBorder(nil, nil, nil, buttonContainer, title)
 
-	// Kartaning asosiy kontenti (vertikal)
+	// Kartaning asosiy kontenti
 	content := container.NewVBox(
-		titleContainer,                 // Sarlavha va tugmalar
-		container.NewCenter(iconImage), // Ikonkani markazlashtirish
-		versionContainer,               // Versiya konteyneri
+		titleContainer,
+		container.NewCenter(iconImage),
+		versionContainer,
 	)
 
-	// Kartani ajratuvchi chiziq
+	// Kartani ajratuvchi chiziq bilan birlashtirish
 	border := widget.NewSeparator()
-	// Kartani chiziq va kontent bilan birlashtirish
 	card := container.NewStack(border, content)
 
-	// Kartani qaytarish
 	return card
 }
