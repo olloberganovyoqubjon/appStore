@@ -23,15 +23,25 @@ func SaveDownloadedSoftware(software models.DownloadedSoftware, filePath string)
 	var softwares []models.DownloadedSoftware // Dasturlar ro‘yxati uchun bo‘sh massiv
 
 	// Fayl mavjudligini tekshirish
-	if _, err := os.Stat(filePath); err == nil { // Fayl mavjudligini tekshiradi
-		file, err := os.Open(filePath) // Faylni o‘qish uchun ochadi
-		if err != nil {                // Agar faylni ochishda xatolik bo‘lsa
-			return fmt.Errorf("%w: %s - %v", ErrFileOpenFailed, filePath, err) // Maxsus xatolik bilan qaytaradi
-		}
-		defer file.Close() // Funksiya tugagach, faylni yopadi
+	fileInfo, err := os.Stat(filePath)
+	if err == nil { // Fayl mavjud bo‘lsa
+		// Fayl bo‘sh bo‘lmasa, o‘qishni davom ettiradi
+		if fileInfo.Size() > 0 {
+			file, err := os.Open(filePath) // Faylni o‘qish uchun ochadi
+			if err != nil {                // Agar faylni ochishda xatolik bo‘lsa
+				return fmt.Errorf("%w: %s - %v", ErrFileOpenFailed, filePath, err) // Maxsus xatolik bilan qaytaradi
+			}
+			defer file.Close() // Funksiya tugagach, faylni yopadi
 
-		if err := json.NewDecoder(file).Decode(&softwares); err != nil { // JSON dan dasturlarni dekod qiladi
-			return fmt.Errorf("%w: %s - %v", ErrJSONDecodeFailed, filePath, err) // Dekodlash xatoligi bilan qaytaradi
+			// JSON dan dasturlarni dekod qiladi
+			if err := json.NewDecoder(file).Decode(&softwares); err != nil {
+				// Agar dekodlashda xatolik bo‘lsa, lekin fayl bo‘sh bo‘lsa yoki faqat [] bo‘lsa, bo‘sh ro‘yxat sifatida davom etadi
+				if err.Error() == "EOF" || err.Error() == "unexpected EOF" {
+					softwares = []models.DownloadedSoftware{} // Bo‘sh ro‘yxat sifatida qayta boshlaydi
+				} else {
+					return fmt.Errorf("%w: %s - %v", ErrJSONDecodeFailed, filePath, err) // Dekodlash xatoligi bilan qaytaradi
+				}
+			}
 		}
 	} else if !os.IsNotExist(err) { // Agar fayl mavjud bo‘lmasa va boshqa xatolik bo‘lsa
 		return fmt.Errorf("%w: %s - %v", ErrFileNotFound, filePath, err) // Fayl topilmadi xatoligi bilan qaytaradi
@@ -68,21 +78,39 @@ func SaveDownloadedSoftware(software models.DownloadedSoftware, filePath string)
 func LoadDownloadedSoftware(filePath string) ([]models.DownloadedSoftware, error) {
 	var softwares []models.DownloadedSoftware // Dasturlar ro‘yxati uchun bo‘sh massiv
 
-	if _, err := os.Stat(filePath); err == nil { // Fayl mavjudligini tekshiradi
-		file, err := os.Open(filePath) // Faylni o‘qish uchun ochadi
-		if err != nil {                // Agar faylni ochishda xatolik bo‘lsa
-			return nil, fmt.Errorf("%w: %s - %v", ErrFileOpenFailed, filePath, err) // Ochish xatoligi bilan qaytaradi
+	// Fayl mavjudligini tekshiradi
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Fayl mavjud bo‘lmasa, bo‘sh ro‘yxat qaytaradi (xatoliksiz)
+			return softwares, nil
 		}
-		defer file.Close() // Funksiya tugagach, faylni yopadi
-
-		if err := json.NewDecoder(file).Decode(&softwares); err != nil { // JSON dan dasturlarni dekod qiladi
-			return nil, fmt.Errorf("%w: %s - %v", ErrJSONDecodeFailed, filePath, err) // Dekodlash xatoligi bilan qaytaradi
-		}
-	} else if !os.IsNotExist(err) { // Agar fayl mavjud bo‘lmasa va boshqa xatolik bo‘lsa
-		return nil, fmt.Errorf("%w: %s - %v", ErrFileNotFound, filePath, err) // Fayl topilmadi xatoligi bilan qaytaradi
+		// Boshqa xatolik bo‘lsa, uni qaytaradi
+		return nil, fmt.Errorf("%w: %s - %v", ErrFileNotFound, filePath, err)
 	}
 
-	return softwares, nil // Dasturlar ro‘yxatini qaytaradi (bo‘sh bo‘lsa ham nil xatoliksiz)
+	// Fayl bo‘sh bo‘lsa, bo‘sh ro‘yxat qaytaradi
+	if fileInfo.Size() == 0 {
+		return softwares, nil
+	}
+
+	// Faylni o‘qish uchun ochadi
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %s - %v", ErrFileOpenFailed, filePath, err)
+	}
+	defer file.Close() // Funksiya tugagach, faylni yopadi
+
+	// JSON dan dasturlarni dekod qiladi
+	if err := json.NewDecoder(file).Decode(&softwares); err != nil {
+		// Agar dekodlashda xatolik bo‘lsa, lekin fayl bo‘sh bo‘lsa yoki faqat [] bo‘lsa, bo‘sh ro‘yxat qaytaradi
+		if err.Error() == "EOF" || err.Error() == "unexpected EOF" {
+			return softwares, nil
+		}
+		return nil, fmt.Errorf("%w: %s - %v", ErrJSONDecodeFailed, filePath, err)
+	}
+
+	return softwares, nil // Dasturlar ro‘yxatini qaytaradi
 }
 
 // JSON fayldan dasturni o'chirish funksiyasi

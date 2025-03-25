@@ -8,6 +8,9 @@ type Software struct {
 	Version     string `json:"version"`     // Dastur versiyasi
 	MainFile    string `json:"mainFile"`    // Asosiy fayl nomi
 	Icon        string `json:"icon"`        // Base64 kodlangan ikonka
+	IsDesktop   bool   `json:"isDesktop"`
+	IsStartup   bool   `json:"isStartup"`
+	IsAutoStart bool   `json:"isAutoStart"`
 }
 
 // API javobini saqlash uchun struktura
@@ -25,4 +28,7 @@ type DownloadedSoftware struct {
 	MainFile     string `json:"main_file"`
 	IconPath     string `json:"icon_path"` // Yangi maydon
 	DownloadDate string `json:"download_date"`
+	IsDesktop    bool   `json:"isDesktop"`
+	IsStartup    bool   `json:"isStartup"`
+	IsAutoStart  bool   `json:"isAutoStart"`
 }

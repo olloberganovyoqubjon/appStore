@@ -37,32 +37,49 @@ func SetupUI(myWindow fyne.Window) {
 	if err != nil {                                                                          // Agar xatolik bo'lsa
 		// Xatolik xabarini yorliqqa yozish
 		label.SetText(fmt.Sprintf("Xatolik: %v", err)) // Xatolik haqida xabar yorliqqa yoziladi
-		// Oynaga faqat xatolik xabarini joylashtirish
-		myWindow.SetContent(container.NewVBox(label)) // Faqat xatolik xabari ko‘rsatilgan oynani yangilaydi
-		return                                        // Funksiyadan chiqish
+		// Foydalanuvchiga xatolikni ko‘rsatish
+		dialog.ShowError(fmt.Errorf("ma'lumotlarni yuklashda xatolik: %v", err), myWindow)
+		// Eski kontentni saqlab qolish
+		myWindow.SetContent(container.NewVBox(label, descriptionLabel))
+		return // Funksiyadan chiqish
+	}
+
+	// Agar dasturlar bo‘sh bo‘lsa
+	if len(softwares) == 0 {
+		label.SetText("Hech qanday dastur topilmadi")
+		dialog.ShowInformation("Diqqat", "Hech qanday dastur topilmadi", myWindow)
+		myWindow.SetContent(container.NewVBox(label, descriptionLabel))
+		return
 	}
 
 	// Qidiruv maydoni yaratish
-	searchEntry := widget.NewEntry() // Yangi matn kiritish maydoni (input) yaratadi
-	// Placeholder matn qo'shish
+	searchEntry := widget.NewEntry()                                           // Yangi matn kiritish maydoni (input) yaratadi
 	searchEntry.SetPlaceHolder("Dastur nomi yoki tavsif bo'yicha qidirish...") // Qidiruv maydoniga placeholder matn qo‘shadi
 	searchEntry.Resize(fyne.NewSize(400, searchEntry.MinSize().Height))        // Qidiruv maydonining o‘lchamini 400xstandart balandlikka o‘zgartiradi
 
 	// Qayta yuklash tugmasi
-	reloadButton := widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), func() { // Ikonkali (refresh) tugma yaratadi
-		SetupUI(myWindow) // Tugma bosilganda UI ni qayta yuklaydi
-	})
+	reloadButton := widget.NewButtonWithIcon("", theme.ViewRefreshIcon(), func() {
+		// Eski oynani tozalash va qayta yuklash
+		label.SetText("Ma'lumot qayta yuklanmoqda...")
+		myWindow.SetContent(container.NewVBox(label))
+		// Goroutine ichida qayta yuklash
+		go func() {
+			SetupUI(myWindow) // UI ni qayta yuklaydi
+		}()
+	}) // Ikonkali (refresh) tugma yaratadi
 
 	// Qidiruv maydoni va tugmani joylashtirish
 	searchContainer := container.NewBorder(nil, nil, nil, reloadButton, searchEntry) // Qidiruv maydoni va tugmani o‘ng tarafda joylashtiradi
 
-	// Dastur kartalari uchun grid konteyner (150x150 o'lchamli)
+	// Dastur kartalari uchun grid konteyner (150x140 o'lchamli)
 	contentContainer := container.NewGridWrap(fyne.NewSize(150, 140)) // 150x140 o‘lchamdagi grid konteyner yaratadi
 
 	// Dastur ro'yxatini yangilash funksiyasi
-	updateSoftwareList := func(query string) { // Qidiruv so‘roviga asoslangan dastur ro‘yxatini yangilaydi
+	updateSoftwareList := func(query string) {
 		// Avvalgi ob'ektlarni tozalash
 		contentContainer.Objects = nil // Grid ichidagi barcha obyektlarni o‘chiradi
+		contentContainer.Refresh()     // Gridni yangilaydi
+
 		// Filtlangan dasturlarni saqlash uchun massiv
 		var filteredSoftwares []fyne.CanvasObject // Filtlangan dastur kartalari uchun massiv
 		// Qidiruv so'zini kichik harflarga aylantirish
@@ -77,10 +94,13 @@ func SetupUI(myWindow fyne.Window) {
 				filteredSoftwares = append(filteredSoftwares, card) // Kartani filtlangan ro‘yxatga qo‘shadi
 			}
 		}
+
 		// Yangi kartalarni konteynerga qo'shish
 		contentContainer.Objects = filteredSoftwares // Gridga yangi kartalarni joylashtiradi
-		// Konteynerni yangilash
-		contentContainer.Refresh() // Gridni yangilaydi
+		contentContainer.Refresh()                   // Gridni qayta yangilaydi
+
+		// Butun oynani qayta render qilish
+		myWindow.Canvas().Refresh(contentContainer) // Oynani majburiy yangilaydi
 	}
 
 	// Boshlang'ich ro'yxatni ko'rsatish (qidiruvsiz)
@@ -102,6 +122,9 @@ func SetupUI(myWindow fyne.Window) {
 
 	// Oynaga asosiy konteynerni joylashtirish
 	myWindow.SetContent(mainContainer) // Oynaning asosiy tarkibini yangilaydi
+
+	// Oynani qayta render qilish
+	myWindow.Canvas().Refresh(mainContainer) // Butun oynani majburiy yangilaydi
 }
 
 func createSoftwareCard(software models.Software, descriptionLabel *widget.Label, myWindow fyne.Window) fyne.CanvasObject {
@@ -224,7 +247,9 @@ func createSoftwareCard(software models.Software, descriptionLabel *widget.Label
 					return
 				}
 
-				services.RemoveShortcut(softwareData.Name)
+				services.RemoveDesktopShortcut(softwareData.Name)
+				services.RemoveStartMenuShortcut(softwareData.Name)
+				services.RemoveStartupShortcut(softwareData.Name)
 				deleteButton.Hide()
 				updateButton.Hide()
 				downloadButton.Show()
@@ -239,12 +264,9 @@ func createSoftwareCard(software models.Software, descriptionLabel *widget.Label
 		folder := services.GetUserLocalPath()                      // Foydalanuvchi mahalliy papkasini oladi
 		services.DownloadPath = filepath.Join(folder, software.ID) // Yuklash yo‘lini dastur ID si bilan birlashtiradi
 
-		if _, err := os.Stat(services.DownloadPath); err == nil { // Agar papka mavjud bo‘lsa
-			err = os.RemoveAll(services.DownloadPath) // Papkani o‘chiradi
-			if err != nil {
-				dialog.ShowError(fmt.Errorf("papkani o'chirishda xatolik: %v", err), myWindow) // Agar xatolik bo‘lsa
-				return                                                                         // Funksiyadan chiqadi
-			}
+		err = removeFolder(services.DownloadPath)
+		if err != nil {
+			dialog.ShowError(fmt.Errorf("papkani o'chirishda xatolik: %v", err), myWindow) // Agar xatolik bo‘lsa
 		}
 
 		err = os.Mkdir(services.DownloadPath, 0755) // Yangi papka yaratadi (ruxsatlar: 0755)
@@ -264,10 +286,10 @@ func createSoftwareCard(software models.Software, descriptionLabel *widget.Label
 		go func() { // Goroutine ishlatib, fon rejimida yuklashni amalga oshiradi
 			mainFilePath, iconFilePath, err := services.DownloadFile(fileURL, services.DownloadPath) // Faylni yuklaydi
 			if err != nil {                                                                          // Agar xatolik bo‘lsa
-				progressBar.Hide()                                                                                     // Progress barni yashiradi
-				downloadButton.Show()                                                                                  // "Yuklash" tugmasini qayta ko‘rsatadi
-				fyne.CurrentApp().SendNotification(fyne.NewNotification("Xatolik", "Yuklashda xatolik: "+err.Error())) // Xatolik xabarini ko‘rsatadi
-				return                                                                                                 // Funksiyadan chiqadi
+				progressBar.Hide()    // Progress barni yashiradi
+				downloadButton.Show() // "Yuklash" tugmasini qayta ko‘rsatadi
+				dialog.ShowError(fmt.Errorf("yuklashda xatolik: %v", err), myWindow)
+				return // Funksiyadan chiqadi
 			}
 
 			softwareData := models.DownloadedSoftware{ // Yuklangan dastur ma’lumotlarini tayyorlaydi
@@ -278,6 +300,9 @@ func createSoftwareCard(software models.Software, descriptionLabel *widget.Label
 				MainFile:     filepath.Base(mainFilePath),              // Asosiy fayl nomi
 				IconPath:     filepath.Base(iconFilePath),              // Ikonka fayl nomi
 				DownloadDate: time.Now().Format("2006-01-02 15:04:05"), // Yuklash sanasi
+				IsDesktop:    software.IsDesktop,
+				IsStartup:    software.IsStartup,
+				IsAutoStart:  software.IsAutoStart,
 			}
 
 			err = storage.SaveDownloadedSoftware(softwareData, "downloaded_software.json")
@@ -294,6 +319,10 @@ func createSoftwareCard(software models.Software, descriptionLabel *widget.Label
 				default:
 					dialog.ShowError(fmt.Errorf("yuklashda noma'lum xatolik: %v", err), myWindow)
 				}
+				err = removeFolder(services.DownloadPath)
+				if err != nil {
+					dialog.ShowError(fmt.Errorf("papkani o'chirishda xatolik: %v", err), myWindow) // Agar xatolik bo‘lsa
+				}
 				progressBar.Hide()
 				downloadButton.Show()
 				return
@@ -304,7 +333,15 @@ func createSoftwareCard(software models.Software, descriptionLabel *widget.Label
 			fyne.CurrentApp().SendNotification(fyne.NewNotification("Yuklandi va o'rnatildi", mainFilePath)) // Muvaffaqiyat xabarini ko‘rsatadi
 
 			programPath := filepath.Join(softwareData.DirPath, softwareData.MainFile) // Dastur yo‘lini birlashtiradi
-			err = services.CreateShortcut(programPath, softwareData.Name)             // Dastur yorlig‘ini yaratadi
+			if softwareData.IsDesktop {
+				services.CreateDesktopShortcut(programPath, softwareData.Name) // Dastur yorlig'ini ishchi stoliga yaratish
+			}
+			if softwareData.IsStartup {
+				services.CreateStartMenuShortcut(programPath, softwareData.Name) // Dastur yorlig'ini start menyuga yaratish
+			}
+			if softwareData.IsAutoStart {
+				services.CreateStartupShortcut(programPath, softwareData.Name)
+			}
 			if err != nil {
 				dialog.ShowError(fmt.Errorf("dastur o'rnatilishida xatolik: %v", err), myWindow) // Agar xatolik bo‘lsa
 			}
@@ -328,15 +365,15 @@ func createSoftwareCard(software models.Software, descriptionLabel *widget.Label
 			DirPath:      softwareData.DirPath,                     // Avvalgi papka yo‘li
 			MainFile:     software.MainFile,                        // Asosiy fayl
 			DownloadDate: time.Now().Format("2006-01-02 15:04:05"), // Yangilash sanasi
+			IsDesktop:    software.IsDesktop,
+			IsStartup:    software.IsStartup,
+			IsAutoStart:  software.IsAutoStart,
 		}
 
 		// Papkani o‘chirish
-		if softwareData.DirPath != "" { // Agar papka mavjud bo‘lsa
-			err = os.RemoveAll(softwareData.DirPath) // Papkani o‘chiradi
-			if err != nil {                          // Agar xatolik bo‘lsa
-				dialog.ShowError(fmt.Errorf("papka o'chirishda xatolik: %v", err), myWindow)
-				return // Funksiyadan chiqadi
-			}
+		err = removeFolder(softwareData.DirPath)
+		if err != nil {
+			dialog.ShowError(fmt.Errorf("papkani o'chirishda xatolik: %v", err), myWindow) // Agar xatolik bo‘lsa
 		}
 
 		folder := services.GetUserLocalPath()                      // Foydalanuvchi mahalliy papkasini oladi
@@ -348,7 +385,9 @@ func createSoftwareCard(software models.Software, descriptionLabel *widget.Label
 			return // Funksiyadan chiqadi
 		}
 
-		services.RemoveShortcut(softwareData.Name) // Avvalgi yorliqni o‘chiradi
+		services.RemoveDesktopShortcut(softwareData.Name) // Avvalgi yorliqni o‘chiradi
+		services.RemoveStartMenuShortcut(softwareData.Name)
+		services.RemoveStartupShortcut(softwareData.Name)
 
 		err = storage.SaveDownloadedSoftware(softwareData, "downloaded_software.json")
 		if err != nil {
@@ -363,6 +402,10 @@ func createSoftwareCard(software models.Software, descriptionLabel *widget.Label
 				dialog.ShowError(fmt.Errorf("JSON o'qishda xatolik: %v", err), myWindow)
 			default:
 				dialog.ShowError(fmt.Errorf("yuklashda noma'lum xatolik: %v", err), myWindow)
+			}
+			err = removeFolder(softwareData.DirPath)
+			if err != nil {
+				dialog.ShowError(fmt.Errorf("papkani o'chirishda xatolik: %v", err), myWindow) // Agar xatolik bo‘lsa
 			}
 			progressBar.Hide()
 			downloadButton.Show()
@@ -382,13 +425,29 @@ func createSoftwareCard(software models.Software, descriptionLabel *widget.Label
 				progressBar.Hide()           // Progress barni yashiradi
 				deleteButton.Show()          // "O‘chirish" tugmasini ko‘rsatadi
 				updateButton.Show()          // "Yangilash" tugmasini qayta ko‘rsatadi
+				err = removeFolder(softwareData.DirPath)
+				if err != nil {
+					dialog.ShowError(fmt.Errorf("papkani o'chirishda xatolik: %v", err), myWindow) // Agar xatolik bo‘lsa
+				}
 				dialog.ShowError(fmt.Errorf("faylni yuklashda xatolik: %v", err), myWindow)
 				return // Funksiyadan chiqadi
 			}
 
 			programPath := filepath.Join(softwareData.DirPath, softwareData.MainFile) // Dastur yo‘lini birlashtiradi
-			err = services.CreateShortcut(programPath, softwareData.Name)             // Yangi yorliq yaratadi
+			if softwareData.IsDesktop {
+				err = services.CreateDesktopShortcut(programPath, softwareData.Name) // Yangi yorliq yaratadi
+			}
+			if softwareData.IsStartup {
+				err = services.CreateStartMenuShortcut(programPath, softwareData.Name) // Yangi yorliq yaratadi
+			}
+			if softwareData.IsAutoStart {
+				err = services.CreateStartupShortcut(programPath, softwareData.Name) // Yangi yorliq yaratadi
+			}
 			if err != nil {
+				err = removeFolder(softwareData.DirPath)
+				if err != nil {
+					dialog.ShowError(fmt.Errorf("papkani o'chirishda xatolik: %v", err), myWindow) // Agar xatolik bo‘lsa
+				}
 				dialog.ShowError(fmt.Errorf("dastur o'rnatilishida xatolik: %v", err), myWindow) // Agar xatolik bo‘lsa
 			}
 
@@ -459,4 +518,14 @@ func createSoftwareCard(software models.Software, descriptionLabel *widget.Label
 	card := container.NewStack(border, content) // Chiziq va kontentni birlashtiradi
 
 	return card // Tayyor kartani qaytaradi
+}
+
+func removeFolder(path string) error {
+	if _, err := os.Stat(path); err == nil { // Agar papka mavjud bo‘lsa
+		err = os.RemoveAll(path) // Papkani o‘chiradi
+		if err != nil {
+			return err // Funksiyadan chiqadi
+		}
+	}
+	return nil
 }

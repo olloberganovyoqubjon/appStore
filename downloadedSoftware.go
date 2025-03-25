@@ -12,6 +12,9 @@ type DownloadedSoftware struct {
 	Version      string `json:"version"`
 	FilePath     string `json:"file_path"`
 	DownloadDate string `json:"download_date"`
+	IsDesktop    bool   `json:"isDesktop"`
+	IsStartup    bool   `json:"isStartup"`
+	IsAutoStart  bool   `json:"isAutoStart"`
 }
 
 // Ma’lumotlarni faylga yozish

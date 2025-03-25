@@ -1,7 +1,8 @@
 package services
 
 import (
-	"archive/zip"     // ZIP arxivlar bilan ishlash uchun
+	"archive/zip" // ZIP arxivlar bilan ishlash uchun
+	"bytes"
 	"encoding/base64" // Base64 kodlash/dekodlash uchun
 	"encoding/json"   // JSON bilan ishlash uchun
 	"fmt"             // Formatlash va xatoliklarni chop etish uchun
@@ -22,6 +23,9 @@ type DownloadResponse struct {
 	Version     string `json:"version"`     // Dastur versiyasi
 	Icon        string `json:"icon"`        // Base64 kodlangan ikonka
 	File        string `json:"file"`        // Base64 kodlangan ZIP fayl
+	IsDesktop   bool   `json:"isDesktop"`
+	IsStartup   bool   `json:"isStartup"`
+	IsAutoStart bool   `json:"isAutoStart"`
 }
 
 var DownloadPath = "C:/Downloads" // Standart yuklash yo‘li (o‘zgaruvchi)
@@ -205,61 +209,104 @@ func ExtractZIPToLocal(src string) error {
 	return nil // Muvaffaqiyatli yakunlanadi
 }
 
-// Shortcut yaratish
-func CreateShortcut(targetPath, appName string) error {
-	desktopPath := filepath.Join(os.Getenv("USERPROFILE"), "Desktop", appName+".lnk")                                // Ishchi stolda yorliq yo‘li
-	startMenuPath := filepath.Join(os.Getenv("APPDATA"), "Microsoft\\Windows\\Start Menu\\Programs", appName+".lnk") // Start menyuda yorliq yo‘li
-
-	shortcutScript := fmt.Sprintf(` // VBScript kodini tayyorlaydi
-		set WshShell = WScript.CreateObject("WScript.Shell")
-		set shortcut = WshShell.CreateShortcut("%s")
-		shortcut.TargetPath = "%s"
-		shortcut.Save
-		set shortcut = WshShell.CreateShortcut("%s")
-		shortcut.TargetPath = "%s"
-		shortcut.Save
-	`, desktopPath, targetPath, startMenuPath, targetPath)
+// createShortcutVBScript - VBScript orqali yorliq yaratish uchun umumiy funksiya
+func createShortcutVBScript(shortcutPath, targetPath string) error {
+	// VBScript kodini to‘g‘ri formatda tayyorlaymiz
+	shortcutScript := fmt.Sprintf(
+		"set WshShell = WScript.CreateObject(\"WScript.Shell\")\n"+
+			"set shortcut = WshShell.CreateShortcut(\"%s\")\n"+
+			"shortcut.TargetPath = \"%s\"\n"+
+			"shortcut.Save",
+		shortcutPath, targetPath)
 
 	tempScript := filepath.Join(os.Getenv("TEMP"), "create_shortcut.vbs") // Vaqtinchalik VBS fayl yo‘li
 	err := os.WriteFile(tempScript, []byte(shortcutScript), 0644)         // VBS skriptni faylga yozadi
 	if err != nil {                                                       // Agar xatolik bo‘lsa
-		return err // Xatolikni qaytaradi
+		return fmt.Errorf("faylga yozishda xatolik: %v", err) // Xatolikni qaytaradi
 	}
+	defer os.Remove(tempScript) // Funksiya tugagach vaqtinchalik faylni o‘chiradi
 
 	cmd := exec.Command("wscript", tempScript) // VBS skriptni ishga tushirish buyrug‘i
-	err = cmd.Run()                            // Buyruqni bajaradi
-	if err != nil {                            // Agar xatolik bo‘lsa
-		return err // Xatolikni qaytaradi
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out    // Standart chiqishni saqlash uchun
+	cmd.Stderr = &stderr // Standart xatolik chiqishini saqlash uchun
+	err = cmd.Run()      // Buyruqni bajaradi
+	if err != nil {      // Agar xatolik bo‘lsa
+		return fmt.Errorf("skriptni ishga tushirishda xatolik: %v, stderr: %s", err, stderr.String()) // Xatolik va stderr ni qaytaradi
 	}
 
-	os.Remove(tempScript) // Vaqtinchalik faylni o‘chiradi
-	return nil            // Muvaffaqiyatli yakunlanadi
+	return nil // Muvaffaqiyatli yakunlanadi
 }
 
-// Shortcut'larni o‘chirish
-func RemoveShortcut(appName string) error {
-	desktopPath := filepath.Join(os.Getenv("USERPROFILE"), "Desktop", appName+".lnk")                                // Ishchi stolda yorliq yo‘li
-	startMenuPath := filepath.Join(os.Getenv("APPDATA"), "Microsoft\\Windows\\Start Menu\\Programs", appName+".lnk") // Start menyuda yorliq yo‘li
+// CreateDesktopShortcut - Ishchi stolga yorliq yaratadi
+func CreateDesktopShortcut(targetPath, appName string) error {
+	desktopPath := filepath.Join(os.Getenv("USERPROFILE"), "Desktop", appName+".lnk") // Ishchi stolda yorliq yo‘li
+	err := createShortcutVBScript(desktopPath, targetPath)                            // VBScript orqali yorliq yaratadi
+	if err != nil {                                                                   // Agar xatolik bo‘lsa
+		return fmt.Errorf("ishchi stolga yorliq yaratishda xatolik: %v", err) // Xatolikni qaytaradi
+	}
+	return nil // Muvaffaqiyatli yakunlanadi
+}
 
-	// Ishchi stoldagi shortcut’ni o‘chirish
-	if _, err := os.Stat(desktopPath); err == nil { // Agar yorliq mavjud bo‘lsa
+// CreateStartMenuShortcut - Start menyuga yorliq yaratadi
+func CreateStartMenuShortcut(targetPath, appName string) error {
+	startMenuPath := filepath.Join(os.Getenv("APPDATA"), "Microsoft\\Windows\\Start Menu\\Programs", appName+".lnk") // Start menyuda yorliq yo‘li
+	err := createShortcutVBScript(startMenuPath, targetPath)                                                         // VBScript orqali yorliq yaratadi
+	if err != nil {                                                                                                  // Agar xatolik bo‘lsa
+		return fmt.Errorf("start menyuga yorliq yaratishda xatolik: %v", err) // Xatolikni qaytaradi
+	}
+	return nil // Muvaffaqiyatli yakunlanadi
+}
+
+// CreateStartupShortcut - Startup papkasiga yorliq yaratadi (Windows ishga tushganda avtomatik ishga tushish uchun)
+func CreateStartupShortcut(targetPath, appName string) error {
+	startupPath := filepath.Join(os.Getenv("APPDATA"), "Microsoft\\Windows\\Start Menu\\Programs\\Startup", appName+".lnk") // Startup papkasida yorliq yo‘li
+	err := createShortcutVBScript(startupPath, targetPath)                                                                  // VBScript orqali yorliq yaratadi
+	if err != nil {                                                                                                         // Agar xatolik bo‘lsa
+		return fmt.Errorf("startup papkasiga yorliq yaratishda xatolik: %v", err) // Xatolikni qaytaradi
+	}
+	return nil // Muvaffaqiyatli yakunlanadi
+}
+
+// RemoveStartupShortcut - Startup papkasidan yorliqni o‘chiradi
+func RemoveStartupShortcut(appName string) error {
+	startupPath := filepath.Join(os.Getenv("APPDATA"), "Microsoft\\Windows\\Start Menu\\Programs\\Startup", appName+".lnk") // Startup papkasida yorliq yo‘li
+	if _, err := os.Stat(startupPath); err == nil {                                                                         // Agar yorliq mavjud bo‘lsa
+		err := os.Remove(startupPath) // Yorliqni o‘chiradi
+		if err != nil {               // Agar xatolik bo‘lsa
+			fmt.Println("startup papkasidan yorliq o‘chirishda xatolik:", err)          // Xatolikni konsolga chiqaradi
+			return fmt.Errorf("startup papkasidan yorliq o‘chirishda xatolik: %v", err) // Xatolikni qaytaradi
+		}
+		fmt.Println("startup papkasidan yorliq o‘chirildi:", startupPath) // Muvaffaqiyat xabarini chiqaradi
+	}
+	return nil // Muvaffaqiyatli yakunlanadi
+}
+
+// RemoveDesktopShortcut - Ishchi stoldan yorliqni o‘chiradi
+func RemoveDesktopShortcut(appName string) error {
+	desktopPath := filepath.Join(os.Getenv("USERPROFILE"), "Desktop", appName+".lnk") // Ishchi stolda yorliq yo‘li
+	if _, err := os.Stat(desktopPath); err == nil {                                   // Agar yorliq mavjud bo‘lsa
 		err := os.Remove(desktopPath) // Yorliqni o‘chiradi
 		if err != nil {               // Agar xatolik bo‘lsa
-			fmt.Println("Ishchi stoldan shortcut o‘chirishda xatolik:", err) // Xatolikni konsolga chiqaradi
-		} else { // Agar muvaffaqiyatli bo‘lsa
-			fmt.Println("Ishchi stol shortcut o‘chirildi:", desktopPath) // Muvaffaqiyat xabarini chiqaradi
+			fmt.Println("ishchi stoldan yorliq o‘chirishda xatolik:", err)          // Xatolikni konsolga chiqaradi
+			return fmt.Errorf("ishchi stoldan yorliq o‘chirishda xatolik: %v", err) // Xatolikni qaytaradi
 		}
+		fmt.Println("ishchi stoldan yorliq o‘chirildi:", desktopPath) // Muvaffaqiyat xabarini chiqaradi
 	}
+	return nil // Muvaffaqiyatli yakunlanadi
+}
 
-	// Start menyudan shortcut’ni o‘chirish
-	if _, err := os.Stat(startMenuPath); err == nil { // Agar yorliq mavjud bo‘lsa
+// RemoveStartMenuShortcut - Start menyudan yorliqni o‘chiradi
+func RemoveStartMenuShortcut(appName string) error {
+	startMenuPath := filepath.Join(os.Getenv("APPDATA"), "Microsoft\\Windows\\Start Menu\\Programs", appName+".lnk") // Start menyuda yorliq yo‘li
+	if _, err := os.Stat(startMenuPath); err == nil {                                                                // Agar yorliq mavjud bo‘lsa
 		err := os.Remove(startMenuPath) // Yorliqni o‘chiradi
 		if err != nil {                 // Agar xatolik bo‘lsa
-			fmt.Println("Start menyudan shortcut o‘chirishda xatolik:", err) // Xatolikni konsolga chiqaradi
-		} else { // Agar muvaffaqiyatli bo‘lsa
-			fmt.Println("Start menyu shortcut o‘chirildi:", startMenuPath) // Muvaffaqiyat xabarini chiqaradi
+			fmt.Println("start menyudan yorliq o‘chirishda xatolik:", err)          // Xatolikni konsolga chiqaradi
+			return fmt.Errorf("start menyudan yorliq o‘chirishda xatolik: %v", err) // Xatolikni qaytaradi
 		}
+		fmt.Println("start menyudan yorliq o‘chirildi:", startMenuPath) // Muvaffaqiyat xabarini chiqaradi
 	}
-
-	return nil // Muvaffaqiyatli yakunlanadi (xatolik bo‘lsa ham nil qaytaradi)
+	return nil // Muvaffaqiyatli yakunlanadi
 }
